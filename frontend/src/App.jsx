@@ -7,6 +7,13 @@ import ReportPage from './pages/ReportPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import reportApi from './api/reports';
+import Sidebar from './components/admin/Sidebar';
+import Dashboard from './pages/admin/Dashboard';
+import Analytics from './pages/admin/Analytics';
+import IssueDetails from './components/admin/IssueDetails';
+import { useEffect } from 'react';
+
+
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -15,6 +22,16 @@ function ProtectedRoute({ children }) {
   }
   return children;
 }
+
+function AdminProtectedRoute({ children }) {
+  const { user } = useAuth();
+  // Role is likely in user.role based on AuthPage.jsx:31/48
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 
 function ReportIssue() {
   const [inputText, setInputText] = useState('');
@@ -42,6 +59,8 @@ function ReportIssue() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    console.log("Submit clicked. Image:", !!image);
+    
     if (!image) {
       setError('Please select or paste an image of the issue.');
       return;
@@ -51,36 +70,47 @@ function ReportIssue() {
     setError('');
     setSuccess(false);
 
-    // Get current location as fallback if EXIF fails on backend
-    // Or just provide it directly as requested by API logic
+    const geoOptions = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    };
+
+    console.log("Requesting geolocation...");
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        console.log("Location received:", position.coords.latitude, position.coords.longitude);
         try {
           const reportData = {
-            user_id: user.user_id, // From backend login response
+            user_id: user?.user_id || "anonymous",
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             description: inputText,
             image: image
           };
 
+          console.log("Calling API...");
           const result = await reportApi.createReport(reportData);
-          console.log('Report created:', result);
+          console.log('Report result:', result);
           setSuccess(true);
           setInputText('');
           setImage(null);
         } catch (err) {
+          console.error("API Error:", err);
           setError(err.toString());
         } finally {
           setLoading(false);
         }
       },
       (err) => {
-        setError("Location access denied. Please enable location to report issues.");
+        console.error("Geolocation Error:", err);
+        setError(`Location error: ${err.message}. Please enable location permissions.`);
         setLoading(false);
-      }
+      },
+      geoOptions
     );
   };
+
 
   return (
     <div className="w-full flex-1 flex flex-col items-center justify-center pt-10 pb-20 px-4">
@@ -203,6 +233,11 @@ function Navigation() {
         
         {user ? (
           <div className="flex items-center gap-4">
+            {user.role === 'admin' && (
+              <Link to="/admin/dashboard" className="text-[15px] font-bold text-indigo-500 hover:text-indigo-400 p-2 transition-colors">
+                Dashboard
+              </Link>
+            )}
             <button onClick={logout} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 transition-colors" title="Log out">
               <LogOut size={18} />
             </button>
@@ -228,15 +263,71 @@ function Navigation() {
 
 function App() {
   const location = useLocation();
+  const { user } = useAuth();
+  const [complaints, setComplaints] = useState([]);
+
+  const fetchComplaints = async () => {
+    try {
+      const data = await reportApi.getFeed();
+      const mapped = data.map(r => ({
+        id: r._id,
+        displayId: `CIV-${r._id.toString().slice(-5).toUpperCase()}`,
+        type: r.issue_type,
+
+        location: r.location_name || `Lat: ${r.location.coordinates[1].toFixed(2)}, Lng: ${r.location.coordinates[0].toFixed(2)}`,
+        severity: r.severity,
+        status: r.status,
+        progress: r.status === 'Resolved' || r.status === 'Closed' ? 100 : (r.status === 'In Progress' ? 50 : 10),
+        latitude: r.location.coordinates[1],
+        longitude: r.location.coordinates[0],
+        image: r.image_url.startsWith('http') ? r.image_url : `http://localhost:8000${r.image_url}`
+      }));
+      setComplaints(mapped);
+    } catch (err) {
+      console.error('Failed to fetch admin complaints:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchComplaints();
+  }, []);
+
+  const updateComplaintStatus = async (id, newStatus) => {
+    try {
+      await reportApi.updateStatus(id, newStatus);
+      // Update local state for immediate feedback
+      setComplaints(prev => prev.map(c => {
+        if (c.id === id) {
+          let progress = c.progress;
+          if (newStatus === 'Resolved' || newStatus === 'Closed') progress = 100;
+          if (newStatus === 'Open') progress = 10;
+          if (newStatus === 'In Progress') progress = 50;
+          return { ...c, status: newStatus, progress };
+        }
+        return c;
+      }));
+    } catch (err) {
+      alert("Failed to update status on server.");
+    }
+  };
+
+
+  const isAdminPath = location.pathname.startsWith('/admin');
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex flex-col items-center">
-      {/* Ambient background colors */}
-      <div className="bg-gradient-spot-1"></div>
-      <div className="bg-gradient-spot-2"></div>
+    <div className={`min-h-screen relative overflow-hidden flex ${isAdminPath ? 'flex-row bg-slate-950' : 'flex-col items-center'}`}>
+      {/* Ambient background colors - only for public pages */}
+      {!isAdminPath && (
+        <>
+          <div className="bg-gradient-spot-1"></div>
+          <div className="bg-gradient-spot-2"></div>
+        </>
+      )}
 
-      <div className="w-full max-w-6xl p-6 md:p-8 flex-1 flex flex-col z-10">
-        <Navigation />
+      {isAdminPath && <Sidebar />}
+
+      <div className={`${isAdminPath ? 'flex-1 overflow-y-auto p-8' : 'w-full max-w-6xl p-6 md:p-8 flex-1 flex flex-col z-10'}`}>
+        {!isAdminPath && <Navigation />}
 
         {/* Main Content Area */}
         <Routes>
@@ -248,11 +339,29 @@ function App() {
               <ReportIssue />
             </ProtectedRoute>
           } />
+
+          {/* Admin Routes */}
+          <Route path="/admin/dashboard" element={
+            <AdminProtectedRoute>
+              <Dashboard complaints={complaints} updateStatus={updateComplaintStatus} />
+            </AdminProtectedRoute>
+          } />
+          <Route path="/admin/analytics" element={
+            <AdminProtectedRoute>
+              <Analytics complaints={complaints} />
+            </AdminProtectedRoute>
+          } />
+          <Route path="/admin/issue/:id" element={
+            <AdminProtectedRoute>
+              <IssueDetails complaints={complaints} />
+            </AdminProtectedRoute>
+          } />
         </Routes>
       </div>
     </div>
   );
 }
+
 
 export default function RootApp() {
   return (

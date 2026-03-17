@@ -6,6 +6,8 @@ from ..database import db, reports_collection, votes_collection
 from ..services.gemini import analyze_image
 from bson import ObjectId
 from pydantic import BaseModel
+import aiohttp
+
 
 class VoteRequest(BaseModel):
     report_id: str
@@ -14,9 +16,36 @@ class VoteRequest(BaseModel):
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
-# Directory to store uploads
+# Directory to store uploads temporarily
 UPLOAD_DIR = os.path.join("backend", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+async def upload_to_monarch(filename: str, file_bytes: bytes) -> str:
+    upload_url = "https://api.monarchupload.cc/v3/upload"
+    secret = os.getenv("MONARCH_SECRET", "RatUFrFSDWXg")
+    print(f"Uploading file to Monarch: {filename} (Secret Length: {len(secret) if secret else 0})")
+
+
+    form_data = aiohttp.FormData()
+    form_data.add_field('secret', secret)
+    form_data.add_field('file', file_bytes, filename=filename) # Remove explicit multipart/form-data for the field
+
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(upload_url, data=form_data) as response:
+            print(f"Monarch Response Status: {response.status}")
+            result = await response.json()
+            print(f"Monarch Full Response: {result}")
+            
+            if response.status != 200:
+                print(f"Monarch Upload Failed: {response.status}")
+                return None
+            
+            if "data" in result and "url" in result["data"]:
+                return result["data"]["url"]
+            return None
+
+
 
 @router.post("/create")
 async def create_report(
@@ -26,18 +55,20 @@ async def create_report(
     description: str = Form(None),
     image: UploadFile = File(...)
 ):
+    print(f"\n>>> [CREATE REPORT] User: {user_id}, Loc: ({latitude}, {longitude})")
     try:
-        # 1. Handle Image Upload
+        # 1. Handle Image Upload (Temporarily for analysis)
+        print("Saving temp file...")
+
         file_ext = os.path.splitext(image.filename)[1]
         unique_filename = f"{uuid.uuid4()}{file_ext}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
         
+        content = await image.read()
         with open(file_path, "wb") as f:
-            f.write(await image.read())
+            f.write(content)
         
         # 2. Check for nearby reports (within 50 meters)
-        # 1 degree is roughly 111km, so 50m is approx 0.00045 degrees
-        # However, MongoDB $near with $maxDistance in meters is better
         nearby_report = await reports_collection.find_one({
             "location": {
                 "$near": {
@@ -52,7 +83,10 @@ async def create_report(
         })
 
         if nearby_report:
-            # Increment report_count instead of creating new
+            # Merging... clean up temp file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
             await reports_collection.update_one(
                 {"_id": nearby_report["_id"]},
                 {
@@ -70,15 +104,32 @@ async def create_report(
             }
 
         # 3. Process with Gemini
+        print("Calling Gemini analysis...")
         analysis = await analyze_image(file_path)
+        print(f"Gemini Result: {analysis}")
         
+        # 4. Upload to Monarch
+        print("Uploading to Monarch...")
+        monarch_url = await upload_to_monarch(image.filename, content)
+        print(f"Monarch URL: {monarch_url}")
+        
+        # 5. Clean up temp file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        if not monarch_url:
+            print("ERROR: Monarch URL is empty")
+            raise Exception("Failed to upload image to Monarch")
+
         # If user provided a manual description, we can append or prioritize it
         final_description = description if description else analysis["description"]
 
-        # 4. Save to MongoDB
+        # 6. Save to MongoDB
+        print(f"Creating DB Doc: Issue={analysis['issue_type']}, URL={monarch_url[:30]}...")
         report_doc = {
+
             "user_id": user_id,
-            "image_url": f"/uploads/{unique_filename}",
+            "image_url": monarch_url,
             "issue_type": analysis["issue_type"],
             "description": final_description,
             "severity": analysis["severity"],
@@ -94,22 +145,30 @@ async def create_report(
         }
         
         result = await reports_collection.insert_one(report_doc)
+        print(f"Insertion successful: {result.inserted_id}")
         
         return {
             "report_id": str(result.inserted_id),
             "detected_issue": analysis["issue_type"],
             "description": final_description,
             "severity": analysis["severity"],
-            "image_url": report_doc["image_url"],
+            "image_url": monarch_url,
             "merged": False
         }
 
+
+
     except Exception as e:
-        print(f"Error creating report: {e}")
+        import traceback
+        print("-" * 50)
+        print(f"CRITICAL ERROR in create_report: {e}")
+        traceback.print_exc()
+        print("-" * 50)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Server error: {str(e)}"
         )
+
 
 @router.post("/vote")
 async def vote_report(vote: VoteRequest):
@@ -153,7 +212,8 @@ async def get_feed(report_status: str = None, issue_type: str = None):
         if issue_type:
             query["issue_type"] = issue_type
             
-        cursor = reports_collection.find(query).sort("created_at", -1)
+        cursor = reports_collection.find(query).sort("last_updated", -1)
+
         reports = []
         async for doc in cursor:
             doc["_id"] = str(doc["_id"])
@@ -176,3 +236,27 @@ async def get_report(report_id: str):
         return report
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+@router.patch("/{report_id}/status")
+async def update_report_status(report_id: str, update: StatusUpdate):
+    try:
+        valid_statuses = ["Open", "In Progress", "Resolved", "Closed"]
+        if update.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {valid_statuses}")
+            
+        result = await reports_collection.update_one(
+            {"_id": ObjectId(report_id)},
+            {"$set": {"status": update.status, "last_updated": datetime.utcnow()}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Report not found")
+            
+        return {"message": "Status updated", "status": update.status}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

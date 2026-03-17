@@ -46,8 +46,14 @@ export default function AuthPage() {
           password
         });
         login(data);
-        navigate('/'); // Redirect to home/report page after auth
+        if (data.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else {
+          navigate('/');
+        }
       }
+
+
     } catch (err) {
       setError(err.toString());
     } finally {
