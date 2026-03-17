@@ -13,7 +13,8 @@ ENV/
 env/
 .env
 
-
+frontend/node_modules
+admin-dashboard/node_modules
 # Project specific
 backend/__pycache__/
 backend/routes/__pycache__/
