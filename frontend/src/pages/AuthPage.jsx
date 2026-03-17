@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { User, ShieldCheck, Mail, Lock, UserPlus } from 'lucide-react';
+import { User, ShieldCheck, Mail, Lock, UserPlus, Loader2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import authApi from '../api/auth';
 
 export default function AuthPage() {
   const location = useLocation();
@@ -13,14 +14,45 @@ export default function AuthPage() {
   const [role, setRole] = useState('citizen'); // 'citizen' or 'admin'
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    login({ email, name: authMode === 'signup' ? name : '', role });
-    navigate('/report'); // Redirect to report page after auth
+    setError('');
+    setLoading(true);
+
+    try {
+      // Map 'citizen' to 'public' as expected by the backend
+      const backendRole = role === 'citizen' ? 'public' : 'admin';
+
+      if (authMode === 'signup') {
+        await authApi.signup({
+          name,
+          email,
+          password,
+          role: backendRole
+        });
+        // After successful signup, switch to login mode or auto-login
+        setAuthMode('login');
+        setError('Account created! Please sign in.');
+      } else {
+        const data = await authApi.login({
+          email,
+          password
+        });
+        login(data);
+        navigate('/'); // Redirect to home/report page after auth
+      }
+    } catch (err) {
+      setError(err.toString());
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -69,6 +101,12 @@ export default function AuthPage() {
               : 'Create an account to track your civic reports.'}
           </p>
         </div>
+
+        {error && (
+          <div className="w-full p-4 mb-6 text-sm font-bold text-center rounded-2xl bg-red-100/10 border border-red-500/20 text-red-500">
+            {error}
+          </div>
+        )}
 
         {/* Role Selector */}
         <div className="w-full flex gap-4 mb-8">
@@ -136,6 +174,8 @@ export default function AuthPage() {
               type="password" 
               placeholder="Password" 
               className="search-input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
@@ -148,9 +188,10 @@ export default function AuthPage() {
 
           <button 
             type="submit"
-            className="mt-6 w-full btn-primary py-4 rounded-2xl font-bold text-sm tracking-wide flex justify-center items-center gap-2"
+            disabled={loading}
+            className="mt-6 w-full btn-primary py-4 rounded-2xl font-bold text-sm tracking-wide flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {authMode === 'login' ? 'Sign In' : 'Sign Up'}
+            {loading ? <Loader2 className="animate-spin" size={18} /> : (authMode === 'login' ? 'Sign In' : 'Sign Up')}
           </button>
         </form>
       </div>

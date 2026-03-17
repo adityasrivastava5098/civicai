@@ -9,15 +9,9 @@ export function AuthProvider({ children }) {
   });
 
   const login = (userData) => {
-    // In a real app, this would be an API call returning a JWT
-    const mockUser = {
-      id: Date.now().toString(),
-      email: userData.email,
-      name: userData.name || userData.email.split('@')[0],
-      role: userData.role || 'citizen',
-    };
-    setUser(mockUser);
-    localStorage.setItem('civicai_user', JSON.stringify(mockUser));
+    // Save full user info (including JWT) from backend
+    setUser(userData);
+    localStorage.setItem('civicai_user', JSON.stringify(userData));
   };
 
   const logout = () => {
