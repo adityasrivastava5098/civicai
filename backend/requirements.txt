@@ -8,3 +8,4 @@ email-validator
 google-generativeai
 python-multipart
 supabase
+aiohttp
