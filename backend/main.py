@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routes import auth, reports
+from .routes import auth, reports, comments
 from .database import init_db
 import os
 

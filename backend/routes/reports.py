@@ -110,16 +110,6 @@ async def create_report(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-@router.get("/{report_id}")
-async def get_report(report_id: str):
-    try:
-        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-        report["_id"] = str(report["_id"])
-        return report
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/vote")
 async def vote_report(vote: VoteRequest):
@@ -155,11 +145,11 @@ async def vote_report(vote: VoteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/feed")
-async def get_feed(status: str = None, issue_type: str = None):
+async def get_feed(report_status: str = None, issue_type: str = None):
     try:
         query = {}
-        if status:
-            query["status"] = status
+        if report_status:
+            query["status"] = report_status
         if issue_type:
             query["issue_type"] = issue_type
             
@@ -175,3 +165,14 @@ async def get_feed(status: str = None, issue_type: str = None):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+@router.get("/{report_id}")
+async def get_report(report_id: str):
+    try:
+        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        report["_id"] = str(report["_id"])
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
