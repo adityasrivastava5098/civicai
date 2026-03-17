@@ -7,6 +7,13 @@ import ReportPage from './pages/ReportPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import reportApi from './api/reports';
+import Sidebar from './components/admin/Sidebar';
+import Dashboard from './pages/admin/Dashboard';
+import Analytics from './pages/admin/Analytics';
+import IssueDetails from './components/admin/IssueDetails';
+import mockComplaints from './data/complaints.json';
+import { useEffect } from 'react';
+
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -15,6 +22,16 @@ function ProtectedRoute({ children }) {
   }
   return children;
 }
+
+function AdminProtectedRoute({ children }) {
+  const { user } = useAuth();
+  // Role is likely in user.role based on AuthPage.jsx:31/48
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 
 function ReportIssue() {
   const [inputText, setInputText] = useState('');
@@ -203,6 +220,11 @@ function Navigation() {
         
         {user ? (
           <div className="flex items-center gap-4">
+            {user.role === 'admin' && (
+              <Link to="/admin/dashboard" className="text-[15px] font-bold text-indigo-500 hover:text-indigo-400 p-2 transition-colors">
+                Dashboard
+              </Link>
+            )}
             <button onClick={logout} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 transition-colors" title="Log out">
               <LogOut size={18} />
             </button>
@@ -228,15 +250,49 @@ function Navigation() {
 
 function App() {
   const location = useLocation();
+  const { user } = useAuth();
+  const [complaints, setComplaints] = useState([]);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem('civicai_complaints');
+    if (savedData) {
+      setComplaints(JSON.parse(savedData));
+    } else {
+      setComplaints(mockComplaints);
+    }
+  }, []);
+
+  const updateComplaintStatus = (id, newStatus) => {
+    const updated = complaints.map(c => {
+      if (c.id === id) {
+        let progress = c.progress;
+        if (newStatus === 'Resolved' || newStatus === 'Closed') progress = 100;
+        if (newStatus === 'Open') progress = 0;
+        if (newStatus === 'In Progress' && progress === 100) progress = 50;
+        return { ...c, status: newStatus, progress };
+      }
+      return c;
+    });
+    setComplaints(updated);
+    localStorage.setItem('civicai_complaints', JSON.stringify(updated));
+  };
+
+  const isAdminPath = location.pathname.startsWith('/admin');
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex flex-col items-center">
-      {/* Ambient background colors */}
-      <div className="bg-gradient-spot-1"></div>
-      <div className="bg-gradient-spot-2"></div>
+    <div className={`min-h-screen relative overflow-hidden flex ${isAdminPath ? 'flex-row bg-slate-950' : 'flex-col items-center'}`}>
+      {/* Ambient background colors - only for public pages */}
+      {!isAdminPath && (
+        <>
+          <div className="bg-gradient-spot-1"></div>
+          <div className="bg-gradient-spot-2"></div>
+        </>
+      )}
 
-      <div className="w-full max-w-6xl p-6 md:p-8 flex-1 flex flex-col z-10">
-        <Navigation />
+      {isAdminPath && <Sidebar />}
+
+      <div className={`${isAdminPath ? 'flex-1 overflow-y-auto p-8' : 'w-full max-w-6xl p-6 md:p-8 flex-1 flex flex-col z-10'}`}>
+        {!isAdminPath && <Navigation />}
 
         {/* Main Content Area */}
         <Routes>
@@ -248,11 +304,29 @@ function App() {
               <ReportIssue />
             </ProtectedRoute>
           } />
+
+          {/* Admin Routes */}
+          <Route path="/admin/dashboard" element={
+            <AdminProtectedRoute>
+              <Dashboard complaints={complaints} updateStatus={updateComplaintStatus} />
+            </AdminProtectedRoute>
+          } />
+          <Route path="/admin/analytics" element={
+            <AdminProtectedRoute>
+              <Analytics complaints={complaints} />
+            </AdminProtectedRoute>
+          } />
+          <Route path="/admin/issue/:id" element={
+            <AdminProtectedRoute>
+              <IssueDetails complaints={complaints} />
+            </AdminProtectedRoute>
+          } />
         </Routes>
       </div>
     </div>
   );
 }
+
 
 export default function RootApp() {
   return (

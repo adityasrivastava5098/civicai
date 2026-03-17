@@ -1,0 +1,62 @@
+[
+  {
+    "id": "CIV-12345",
+    "type": "Pothole",
+    "location": "Avenue Road, Bengaluru",
+    "severity": "High",
+    "status": "Open",
+    "progress": 20,
+    "latitude": 12.9716,
+    "longitude": 77.5946
+  },
+  {
+    "id": "CIV-12346",
+    "type": "Garbage",
+    "location": "Gandhi Nagar, Sector 4",
+    "severity": "Medium",
+    "status": "In Progress",
+    "progress": 55,
+    "latitude": 12.9816,
+    "longitude": 77.6046
+  },
+  {
+    "id": "CIV-12347",
+    "type": "Waterlogging",
+    "location": "HSR Layout, 27th Main",
+    "severity": "High",
+    "status": "Open",
+    "progress": 10,
+    "latitude": 12.9116,
+    "longitude": 77.6446
+  },
+  {
+    "id": "CIV-12348",
+    "type": "Streetlight",
+    "location": "Indiranagar, 100ft Road",
+    "severity": "Low",
+    "status": "Resolved",
+    "progress": 100,
+    "latitude": 12.9716,
+    "longitude": 77.6446
+  },
+  {
+    "id": "CIV-12349",
+    "type": "Others",
+    "location": "Whitefield, ITPL Main Road",
+    "severity": "Medium",
+    "status": "Closed",
+    "progress": 100,
+    "latitude": 12.9816,
+    "longitude": 77.7446
+  },
+  {
+    "id": "CIV-12350",
+    "type": "Pothole",
+    "location": "Koramangala, 5th Block",
+    "severity": "High",
+    "status": "Open",
+    "progress": 15,
+    "latitude": 12.9316,
+    "longitude": 77.6246
+  }
+]
