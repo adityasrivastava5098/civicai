@@ -2,9 +2,15 @@ import os
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
-from ..database import db, reports_collection
+from ..database import db, reports_collection, votes_collection
 from ..services.gemini import analyze_image
 from bson import ObjectId
+from pydantic import BaseModel
+
+class VoteRequest(BaseModel):
+    report_id: str
+    user_id: str
+    vote_type: int # 1 for upvote, -1 for downvote
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -82,6 +88,7 @@ async def create_report(
             },
             "status": "Open",
             "report_count": 1,
+            "score": 0,
             "created_at": datetime.utcnow(),
             "last_updated": datetime.utcnow()
         }
@@ -103,6 +110,50 @@ async def create_report(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+@router.get("/{report_id}")
+async def get_report(report_id: str):
+    try:
+        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        report["_id"] = str(report["_id"])
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/vote")
+async def vote_report(vote: VoteRequest):
+    try:
+        # 1. Upsert vote
+        await votes_collection.update_one(
+            {"user_id": vote.user_id, "report_id": vote.report_id},
+            {"$set": {"vote_type": vote.vote_type}},
+            upsert=True
+        )
+        
+        # 2. Recalculate score
+        pipeline = [
+            {"$match": {"report_id": vote.report_id}},
+            {"$group": {"_id": "$report_id", "total_score": {"$sum": "$vote_type"}}}
+        ]
+        
+        cursor = votes_collection.aggregate(pipeline)
+        result = await cursor.to_list(length=1)
+        
+        new_score = result[0]["total_score"] if result else 0
+        
+        # 3. Update report with new score
+        await reports_collection.update_one(
+            {"_id": ObjectId(vote.report_id)},
+            {"$set": {"score": new_score}}
+        )
+        
+        return {"report_id": vote.report_id, "new_score": new_score}
+        
+    except Exception as e:
+        print(f"Voting Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/feed")
 async def get_feed(status: str = None, issue_type: str = None):
     try:
