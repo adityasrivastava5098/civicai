@@ -25,29 +25,32 @@ async def create_comment(comment: CommentCreate):
             "created_at": datetime.utcnow().isoformat()
         }
         
-        response = supabase.table("comments").insert(data).execute()
-        
-        if hasattr(response, 'error') and response.error:
-            raise HTTPException(status_code=400, detail=str(response.error))
+        if not supabase:
+            raise HTTPException(status_code=503, detail="Comments service is currently unavailable (Supabase client not initialized). Check backend/.env for SUPABASE_URL and SUPABASE_KEY.")
             
+        response = supabase.table("comments").insert(data).execute()
         return response.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Supabase Error: {e}")
+        print(f"Supabase Error (POST): {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{report_id}")
 async def get_comments(report_id: str):
     try:
+        if not supabase:
+            return []
+            
         response = supabase.table("comments")\
             .select("*")\
             .eq("report_id", report_id)\
             .order("created_at", desc=False)\
             .execute()
         
-        if hasattr(response, 'error') and response.error:
-            raise HTTPException(status_code=400, detail=str(response.error))
-            
         return response.data
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Supabase Error: {e}")
+        print(f"Supabase Error (GET): {e}")
         raise HTTPException(status_code=500, detail=str(e))
