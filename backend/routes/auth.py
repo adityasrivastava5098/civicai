@@ -1,16 +1,15 @@
 import os
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, status
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 from ..database import users_collection
 from ..schemas import UserSignup, UserLogin, TokenResponse
 from bson import ObjectId
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Password hashing setup
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing settings are handled by bcrypt directly
 
 # JWT configuration
 SECRET_KEY = os.getenv("JWT_SECRET", "default_secret_key")
@@ -18,10 +17,13 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 1
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 def create_access_token(data: dict):
     to_encode = data.copy()
